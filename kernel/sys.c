@@ -13,6 +13,12 @@
 #include <sys/times.h>
 #include <sys/utsname.h>
 #include <signal.h>
+
+#include <sys/stat.h>
+#include <unistd.h>
+#include <string.h>
+#include <fcntl.h>
+
 int sys_ftime()
 {
 	return -ENOSYS;
@@ -296,9 +302,51 @@ int sys_execve2(const char *path, char * argv[], char * envp[])
 	return -1;
 }
 
+struct linux_dirent {
+	long           d_ino;
+	off_t          d_off;
+	unsigned short d_reclen;
+	char           d_name[14];
+};
+
 int sys_getdents(unsigned int fd, struct linux_dirent *dirp, unsigned int count)
 {
-	return 0;
+ 	//定义
+	struct m_inode *ino;
+	struct buffer_head *head;
+	struct dir_entry *dir;
+	struct linux_dirent dirent;
+	char *buf;
+	int i,j;
+	int ret = 0;
+	int len_dir = sizeof(struct dir_entry);
+	int len_dirent = sizeof(struct linux_dirent);
+	//default
+	if (!count) return -1;
+	//获取inode和buffer_head
+	ino = current->filp[fd]->f_inode;
+	head = bread(ino->i_dev, ino->i_zone[0]);
+	//遍历页目录项
+	for (i = 0; i < ino->i_size; i += len_dir)
+	{
+		if (ret + len_dirent >= count) return 0;
+		dir = (struct dir_entry *)(head->b_data + i);
+		if (dir->inode)
+		{
+			dirent.d_ino = dir->inode;
+			dirent.d_off = 0;
+			dirent.d_reclen = sizeof(dirent);
+			strcpy(dirent.d_name,dir->name);
+			buf = &dirent;
+			for (j = 0; j < dirent.d_reclen; j++)
+				put_fs_byte(*(buf + i), ((char *)dirp) + i + ret);
+			ret += dirent.d_reclen;
+		}
+		else
+			continue;
+	}
+	brelse(head);
+	return ret; 
 }
 
 int sys_pipe2()
